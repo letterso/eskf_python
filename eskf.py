@@ -135,8 +135,8 @@ class ESKF:
             self.imu_dt_ = 0.01         # 频率
             self.gyro_var_ = 1e-5       # 磁力计噪声
             self.acce_var_ = 1e-2       # 加速计噪声
-            self.bias_gyro_var_ = 1e-2  # 磁力计零飘
-            self.bias_acce_var_ = 1e-2  # 加速计零飘
+            self.bias_gyro_var_ = 1e-6  # 磁力计零飘
+            self.bias_acce_var_ = 1e-4  # 加速计零飘
 
             # 更新参数
             self.update_bias_gyro_ = True
@@ -193,9 +193,8 @@ class ESKF:
             dt*dt + 0.5 * self.g_ * dt * dt
         new_v = self.v_ + self.R_.as_matrix() @ (imu.acce_.reshape(-1, 1) -
                                                  self.ba_) * dt + self.g_ * dt
-        new_R = self.R_.dot(
-            SO3.exp(((imu.gyro_.reshape(-1, 1) - self.bg_)*dt).reshape(-1)))
-
+        new_R = SO3(self.R_.as_matrix() @
+                    SO3.exp(((imu.gyro_.reshape(-1, 1) - self.bg_)*dt).reshape(-1)).as_matrix())
         # 更新名义状态，ba,bg,g不变
         self.P_ = new_p
         self.v_ = new_v
@@ -204,14 +203,14 @@ class ESKF:
         # 误差递推，(3.47)
         # 计算运动过程雅可比矩阵 F
         F = np.identity(18)
-        F[0:3, 3:6] = np.identity(3) @ np.array([[dt], [dt], [dt]])
+        F[0:3, 3:6] = np.identity(3) * dt
         F[3:6, 6:9] = -1 * self.R_.as_matrix() @ SO3.wedge((imu.acce_.reshape(-1, 1) -
-                                                            self.ba_).reshape(-1)) @ np.array([[dt], [dt], [dt]])
-        F[3:6, 12:15] = -1 * self.R_.as_matrix() @ np.array([[dt], [dt], [dt]])
-        F[3:6, 15:18] = np.identity(3) @ np.array([[dt], [dt], [dt]])
+                                                            self.ba_).reshape(-1)) * dt
+        F[3:6, 12:15] = -1 * self.R_.as_matrix() * dt
+        F[3:6, 15:18] = np.identity(3) * dt
         F[6:9, 6:9] = SO3.exp(
             (-1*(imu.gyro_.reshape(-1, 1)-self.bg_)*dt).reshape(-1)).as_matrix()
-        F[6:9, 9:12] = -np.identity(3) @ np.array([[dt], [dt], [dt]])
+        F[6:9, 9:12] = -np.identity(3) * dt
 
         # 更新协方差矩阵，(3.48)
         self.dx_ = F @ self.dx_

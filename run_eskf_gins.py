@@ -5,11 +5,13 @@ import math
 import time
 
 import matplotlib.pyplot as plt
+import matplotlib.style as mplstyle
 import numpy as np
 
 import utm
 from eskf import ESKF, StaticIMUInit, IMUState
 
+mplstyle.use('fast')
 
 def ConvertGps2UTM(gps_msg, antenna_pos, antenna_angle):
     # pos
@@ -47,9 +49,9 @@ if __name__ == '__main__':
 
     # 图形界面
     with_ui = True
-    h_predict_p = np.zeros((3, 1))
-    h_gnss_p = np.zeros((3, 1))
-    h_update_p = np.zeros((3, 1))
+    predict_p_plot = np.zeros((3, 1))
+    gnss_p_plot = np.zeros((3, 1))
+    update_p_plot = np.zeros((3, 1))
 
     # 日志
     # 创建logger对象
@@ -121,9 +123,12 @@ if __name__ == '__main__':
                     imu_data = IMUState(float(data_items[1]), gyro, acce)
                     eskf_filter.Predict(imu_data)
                     _, pred_P, pred_v, pred_R, _, _ = eskf_filter.GetNominalState()
-                    h_predict_p = np.hstack((h_predict_p, pred_P))
+                    predict_p_plot = pred_P
                     logger.debug("predict:\n p: {} \n v: {} \n r: {}".format(
                         pred_P, pred_v, pred_R))
+
+                    if with_ui:
+                        plt.plot(predict_p_plot[0], predict_p_plot[1], ".b")
 
                 # 更新
                 if data_items[0] == 'GNSS':
@@ -139,34 +144,36 @@ if __name__ == '__main__':
 
                     # 移除起点
                     gnss_pos = gnss_pos - origin_pose
-                    h_gnss_p = np.hstack((h_gnss_p, gnss_pos))
+                    gnss_p_plot = gnss_pos
 
                     trans_noise = 0.1
                     ang_noise = np.deg2rad(1.0)
                     eskf_filter.ObserveSE3(
                         gnss_pos, gnss_r, trans_noise, ang_noise)
                     _, update_P, update_v, update_R, _, _ = eskf_filter.GetNominalState()
+                    update_p_plot = update_P
                     logger.debug("update:\n p: {} \n v: {} \n r: {}".format(
                         update_P, update_v, update_R))
-                    h_update_p = np.hstack((h_update_p, update_P))
 
-                if with_ui:
-                    plt.cla()
-                    # for stopping simulation with the esc key.
-                    # plt.gcf().canvas.mpl_connect('key_release_event',
-                    #         lambda event: [exit(0) if event.key == 'escape' else None])
-                    plt.plot(h_gnss_p[0, :], h_gnss_p[1, :], ".r")
-                    # plt.plot(h_update_p[0, :], h_update_p[1, :], ".g")
-                    plt.plot(h_predict_p[0, :], h_predict_p[1, :], ".b")
-                    # plt.plot(hxTrue[0, :].flatten(),
-                    #         hxTrue[1, :].flatten(), "-b")
-                    # plt.plot(hxDR[0, :].flatten(),
-                    #         hxDR[1, :].flatten(), "-k")
-                    # plt.plot(hxEst[0, :].flatten(),
-                    #         hxEst[1, :].flatten(), "-r")
-                    # plot_covariance_ellipse(xEst, PEst)
-                    plt.axis("equal")
-                    plt.grid(True)
-                    plt.pause(0.001)
+                    if with_ui:
+                        # plt.cla()
+                        # for stopping simulation with the esc key.
+                        # plt.gcf().canvas.mpl_connect('key_release_event',
+                        #         lambda event: [exit(0) if event.key == 'escape' else None])
+                        # plt.plot(predict_p_plot[0], predict_p_plot[1], ".b")
+                        plt.plot(gnss_p_plot[0], gnss_p_plot[1], ".r")
+                        plt.plot(update_p_plot[0], update_p_plot[1], ".g")
+                        # plt.plot(hxTrue[0, :].flatten(),
+                        #         hxTrue[1, :].flatten(), "-b")
+                        # plt.plot(hxDR[0, :].flatten(),
+                        #         hxDR[1, :].flatten(), "-k")
+                        # plt.plot(hxEst[0, :].flatten(),
+                        #         hxEst[1, :].flatten(), "-r")
+                        # plot_covariance_ellipse(xEst, PEst)
+                        # plt.xlim(-150, 150)
+                        # plt.ylim(-150, 150)
+                        plt.axis("equal")
+                        plt.grid(True)
+                        plt.pause(0.0001)
 
-                time.sleep(0.01)
+                # time.sleep(0.001)
