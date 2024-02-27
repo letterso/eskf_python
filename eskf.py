@@ -199,7 +199,7 @@ class ESKF:
         # 名义递推,(3.41)
         new_p = self.P_ + self.v_ * dt + 0.5 * \
             (self.R_.as_matrix() @ (imu.acce_.reshape(-1, 1) - self.ba_)) * \
-            dt*dt + 0.5 * self.g_ * dt * dt
+            dt * dt + 0.5 * self.g_ * dt * dt
         new_v = self.v_ + self.R_.as_matrix() @ (imu.acce_.reshape(-1, 1) -
                                                  self.ba_) * dt + self.g_ * dt
         new_R = SO3(self.R_.as_matrix() @
@@ -213,11 +213,12 @@ class ESKF:
         # 计算运动过程雅可比矩阵 F
         F = np.identity(18)
         F[0:3, 3:6] = np.identity(3) * dt
-        F[3:6, 6:9] = -1 * self.R_.as_matrix() @ SO3.wedge(imu.acce_ -self.ba_.reshape(-1)) * dt
+        F[3:6, 6:9] = -1 * self.R_.as_matrix() @ SO3.wedge(imu.acce_ -
+                                                           self.ba_.reshape(-1)) * dt
         F[3:6, 12:15] = -1 * self.R_.as_matrix() * dt
         F[3:6, 15:18] = np.identity(3) * dt
         F[6:9, 6:9] = SO3.exp(
-            (-1*(imu.gyro_.reshape(-1, 1)-self.bg_)*dt).reshape(-1)).as_matrix()
+            ((imu.gyro_-self.bg_.reshape(-1))*dt*-1)).as_matrix()
         F[6:9, 9:12] = -np.identity(3) * dt
 
         # 更新协方差矩阵，(3.48)
@@ -271,12 +272,13 @@ class ESKF:
 
         # 更新x和cov
         innov = np.zeros(3).reshape(-1, 1)
-        innov[0:3, 0:1] = self.R_.as_matrix() @ np.array([average_vel,0,0]).reshape(-1,1) - self.v_
+        innov[0:3, 0:1] = self.R_.as_matrix() @ np.array([average_vel, 0, 0]
+                                                         ).reshape(-1, 1) - self.v_
         self.dx_ = K @ innov
         self.cov_ = (np.identity(18) - K @ H) @ self.cov_
         self.UpdateAndReset()
         return True
-    
+
     def ObserveSE3(self, pose_tran: np.array, pose_SO3: np.array, trans_noise: float, ang_noise: float) -> bool:
         """SE3观测
 
@@ -291,8 +293,8 @@ class ESKF:
         """
         # 观测状态变量中的p, R，H为6x18，其余为零
         H = np.zeros([6, 18])
-        H[0:3, 0:3] = np.identity(3) # p
-        H[3:6, 6:9] = np.identity(3) # R
+        H[0:3, 0:3] = np.identity(3)  # p
+        H[3:6, 6:9] = np.identity(3)  # R
 
         # 卡尔曼增益和更新过程
         noise_cov = np.diag(
@@ -321,7 +323,7 @@ class ESKF:
         """
         # 观测状态变量中的p，H为3x18，其余为零
         H = np.zeros([3, 18])
-        H[0:3, 0:3] = np.identity(3) # p
+        H[0:3, 0:3] = np.identity(3)  # p
 
         # 卡尔曼增益和更新过程
         noise_cov = np.diag([trans_noise, trans_noise, trans_noise])

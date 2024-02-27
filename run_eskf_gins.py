@@ -118,8 +118,9 @@ if __name__ == '__main__':
     antenna_angle = np.deg2rad(12.06)
     antenna_pox_x = -0.17
     antenna_pox_y = -0.20
-    first_gps = True
+    first_gnss = True
     origin_pose = np.zeros(3).reshape(-1, 1)
+    last_gnss_pose = np.zeros(3).reshape(-1, 1)
 
     
     # 里程计参数
@@ -243,9 +244,9 @@ if __name__ == '__main__':
                     gnss_pos, gnss_r = ConvertGps2UTM(np.array([float(data_items[2]), float(data_items[3]), float(data_items[4]), float(data_items[5])]),  # lat lon alt heading
                                                       np.array([antenna_pox_x, antenna_pox_y]), antenna_angle)
 
-                    if first_gps:
+                    if first_gnss:
                         origin_pose = gnss_pos
-                        first_gps = False
+                        first_gnss = False
                         continue
 
                     # 移除起点
@@ -265,10 +266,12 @@ if __name__ == '__main__':
                         update_P, update_v, update_R))
 
                     if with_ui:
-                        update_p_queue.put((gnss_pos[0], gnss_pos[1], gnss_pos[2],
-                                            update_P[0], update_P[1], update_P[2]))
-                        if update_p_queue.qsize() > 100:
-                            update_p_queue.get()
+                        if math.sqrt(np.sum(np.power(gnss_pos - last_gnss_pose,2))) >5:
+                            update_p_queue.put((gnss_pos[0], gnss_pos[1], gnss_pos[2],
+                                                update_P[0], update_P[1], update_P[2]))
+                            if update_p_queue.qsize() > 100:
+                                update_p_queue.get()
+                            last_gnss_pose = gnss_pos
 
                 time.sleep(0.001)
 
