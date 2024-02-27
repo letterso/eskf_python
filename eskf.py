@@ -103,18 +103,21 @@ class StaticIMUInit():
 
 
 class ESKF:
-    def __init__(self) -> None:
+    def __init__(self, logger) -> None:
+        # 日志
+        self.logger = logger
+
         # 历史信息
         self.last_imu_ = IMUState(0, np.array([0, 0, 0]), np.array([0, 0, 0]))
 
         # State: p, v, q, ba, bg, g
         # 名义状态
-        self.P_ = np.zeros(3).reshape(-1, 1)
-        self.v_ = np.zeros(3).reshape(-1, 1)
+        self.P_ = np.zeros(3).reshape(-1, 1)    # 3x1
+        self.v_ = np.zeros(3).reshape(-1, 1)    # 3x1
         self.R_ = SO3(np.identity(3))
-        self.ba_ = np.zeros(3).reshape(-1, 1)
-        self.bg_ = np.zeros(3).reshape(-1, 1)
-        self.g_ = np.array([[0], [0], [-9.8]])
+        self.ba_ = np.zeros(3).reshape(-1, 1)   # 3x1
+        self.bg_ = np.zeros(3).reshape(-1, 1)   # 3x1
+        self.g_ = np.array([[0], [0], [-9.8]])  # 3x1
 
         # 误差状态
         self.dx_ = np.zeros(18).reshape(-1, 1)
@@ -132,11 +135,11 @@ class ESKF:
     class Options():
         def __init__(self) -> None:
             # IMU参数
-            self.imu_dt_ = 0.01         # 频率
-            self.gyro_var_ = 1e-5       # 磁力计噪声
-            self.acce_var_ = 1e-2       # 加速计噪声
-            self.bias_gyro_var_ = 1e-6  # 磁力计零飘
-            self.bias_acce_var_ = 1e-4  # 加速计零飘
+            self.imu_dt_ = 0.01                             # 频率
+            self.gyro_var_ = np.array([1e-5, 1e-5, 1e-5])   # 磁力计噪声
+            self.acce_var_ = np.array([1e-2, 1e-2, 1e-2])   # 加速计噪声
+            self.bias_gyro_var_ = 1e-6                      # 磁力计零飘
+            self.bias_acce_var_ = 1e-4                      # 加速计零飘
 
             # 更新参数
             self.update_bias_gyro_ = True
@@ -159,14 +162,20 @@ class ESKF:
     def BuildProcessNoise(self, options: Options):
         # 过程噪声
         # [P, V, R, Ba, Bg, g]
-        ev2 = options.acce_var_  # * options.acce_var_
-        et2 = options.gyro_var_  # * options.gyro_var_
+        ev2 = np.zeros(3)
+        ev2[0] = options.acce_var_[0]  # * options.acce_var_[0]
+        ev2[1] = options.acce_var_[1]  # * options.acce_var_[1]
+        ev2[2] = options.acce_var_[2]  # * options.acce_var_[2]
+        et2 = np.zeros(3)
+        et2[0] = options.gyro_var_[0]  # * options.gyro_var_[0]
+        et2[1] = options.gyro_var_[1]  # * options.gyro_var_[1]
+        et2[2] = options.gyro_var_[2]  # * options.gyro_var_[2]
         eg2 = options.bias_gyro_var_  # * options.bias_gyro_var_
         ea2 = options.bias_acce_var_  # * options.bias_acce_var_
 
         self.Q_ = np.diag([0, 0, 0,
-                           ev2, ev2, ev2,
-                           et2, et2, et2,
+                           ev2[0], ev2[1], ev2[2],
+                           et2[0], et2[1], et2[2],
                            eg2, eg2, eg2,
                            ea2, ea2, ea2,
                            0, 0, 0])
@@ -194,7 +203,7 @@ class ESKF:
         new_v = self.v_ + self.R_.as_matrix() @ (imu.acce_.reshape(-1, 1) -
                                                  self.ba_) * dt + self.g_ * dt
         new_R = SO3(self.R_.as_matrix() @
-                    SO3.exp(((imu.gyro_.reshape(-1, 1) - self.bg_)*dt).reshape(-1)).as_matrix())
+                    SO3.exp((imu.gyro_ - self.bg_.reshape(-1))*dt).as_matrix())
         # 更新名义状态，ba,bg,g不变
         self.P_ = new_p
         self.v_ = new_v
@@ -204,8 +213,7 @@ class ESKF:
         # 计算运动过程雅可比矩阵 F
         F = np.identity(18)
         F[0:3, 3:6] = np.identity(3) * dt
-        F[3:6, 6:9] = -1 * self.R_.as_matrix() @ SO3.wedge((imu.acce_.reshape(-1, 1) -
-                                                            self.ba_).reshape(-1)) * dt
+        F[3:6, 6:9] = -1 * self.R_.as_matrix() @ SO3.wedge(imu.acce_ -self.ba_.reshape(-1)) * dt
         F[3:6, 12:15] = -1 * self.R_.as_matrix() * dt
         F[3:6, 15:18] = np.identity(3) * dt
         F[6:9, 6:9] = SO3.exp(
@@ -239,6 +247,36 @@ class ESKF:
         # 清空误差变量
         self.dx_ = np.zeros(18).reshape(-1, 1)
 
+    def ObserveWheelSpeed(self, velo: np.array, velo_noise: float) -> bool:
+        """轮速计观测
+
+        Args:
+            odom (np.array): 观测平移
+            odom_noise (float): 平移噪声
+
+        Returns:
+            bool: _description_
+        """
+        # 观测状态变量中的速度，H为6x18，其余为零
+        H = np.zeros([3, 18])
+        H[0:3, 3:6] = np.identity(3)
+
+        # 卡尔曼增益和更新过程
+        noise_cov = np.diag(
+            [velo_noise, velo_noise, velo_noise])
+        K = self.cov_ @ H.T @ np.linalg.inv(H @ self.cov_ @  H.T + noise_cov)
+
+        # velocity obs
+        average_vel = 0.5 * (velo[0] + velo[1])
+
+        # 更新x和cov
+        innov = np.zeros(3).reshape(-1, 1)
+        innov[0:3, 0:1] = self.R_.as_matrix() @ np.array([average_vel,0,0]).reshape(-1,1) - self.v_
+        self.dx_ = K @ innov
+        self.cov_ = (np.identity(18) - K @ H) @ self.cov_
+        self.UpdateAndReset()
+        return True
+    
     def ObserveSE3(self, pose_tran: np.array, pose_SO3: np.array, trans_noise: float, ang_noise: float) -> bool:
         """SE3观测
 
@@ -253,8 +291,8 @@ class ESKF:
         """
         # 观测状态变量中的p, R，H为6x18，其余为零
         H = np.zeros([6, 18])
-        H[0:3, 0:3] = np.identity(3)
-        H[3:6, 6:9] = np.identity(3)
+        H[0:3, 0:3] = np.identity(3) # p
+        H[3:6, 6:9] = np.identity(3) # R
 
         # 卡尔曼增益和更新过程
         noise_cov = np.diag(
@@ -266,6 +304,33 @@ class ESKF:
         innov[0:3, 0:1] = pose_tran - self.P_
         innov[3:6, 0:1] = SO3(self.R_.inv().as_matrix() @
                               pose_SO3).log().reshape(-1, 1)
+        self.dx_ = K @ innov
+        self.cov_ = (np.identity(18) - K @ H) @ self.cov_
+        self.UpdateAndReset()
+        return True
+
+    def ObserveTran(self, pose_tran: np.array, trans_noise: float) -> bool:
+        """位置观测
+
+        Args:
+            pose_tran (np.array): 观测平移
+            trans_noise (float): 平移噪声
+
+        Returns:
+            bool: _description_
+        """
+        # 观测状态变量中的p，H为3x18，其余为零
+        H = np.zeros([3, 18])
+        H[0:3, 0:3] = np.identity(3) # p
+
+        # 卡尔曼增益和更新过程
+        noise_cov = np.diag([trans_noise, trans_noise, trans_noise])
+        K = self.cov_ @ H.T @ np.linalg.inv(H @ self.cov_ @  H.T + noise_cov)
+
+        # 更新x和cov
+        innov = np.zeros(3).reshape(-1, 1)
+        innov[0:3, 0:1] = pose_tran - self.P_
+
         self.dx_ = K @ innov
         self.cov_ = (np.identity(18) - K @ H) @ self.cov_
         self.UpdateAndReset()
