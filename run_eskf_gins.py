@@ -33,9 +33,9 @@ predict_p_queue = Queue()
 update_p_queue = Queue()
 stop_event = threading.Event()
 def plot_function():
-
+    
     # gnss_plot, = plt.plot([], [], ".r")
-    predit_plot_list = np.zeros((3, 500))
+    predit_plot_list = np.zeros((3, 200))
 
     # gnss_plot, = plt.plot([], [], ".r")
     gnss_plot_list = np.zeros((3, 500))
@@ -67,13 +67,13 @@ def plot_function():
         # gnss_plot.set_data(gnss_plot_list[0], gnss_plot_list[1])
         # update_plot.set_data(update_plot_list[0], update_plot_list[1])
         plt.plot(predit_plot_list[0], predit_plot_list[1], ".b")
-        plt.plot(gnss_plot_list[0], gnss_plot_list[1], ".r")
-        plt.plot(update_plot_list[0], update_plot_list[1], ".g")
+        plt.plot(gnss_plot_list[0], gnss_plot_list[1], "r")
+        plt.plot(update_plot_list[0], update_plot_list[1], "g")
 
         # draw
         plt.axis("equal")
         plt.grid(True)
-        plt.pause(0.01)
+        plt.pause(0.05)
         # T2 = time.time()
         # print('程序运行时间:%s毫秒' % ((T2 - T1)*1000))
     
@@ -118,7 +118,7 @@ if __name__ == '__main__':
     antenna_angle = np.deg2rad(12.06)
     antenna_pox_x = -0.17
     antenna_pox_y = -0.20
-    first_gnss = True
+    gnss_inited = False
     origin_pose = np.zeros(3).reshape(-1, 1)
     last_gnss_pose = np.zeros(3).reshape(-1, 1)
 
@@ -208,8 +208,13 @@ if __name__ == '__main__':
 
             else:
                 # 预测
-                # Todo 在无GPS时，积分会漂移，增加ZUPT/轮速计约束
+                # Todo 在无GPS时，积分会漂移，增加ZUPT
                 if data_items[0] == 'IMU':
+
+                    # GNSS初始化后再更新
+                    if not gnss_inited:
+                        continue
+
                     gyro = np.array([float(data_items[2]), float(
                         data_items[3]), float(data_items[4])])
                     acce = np.array([float(data_items[5]), float(
@@ -223,19 +228,19 @@ if __name__ == '__main__':
 
                     if with_ui:
                         predict_p_queue.put((pred_P[0],pred_P[1],pred_P[2]))
-                        if predict_p_queue.qsize() > 500:
+                        if predict_p_queue.qsize() > 200:
                             predict_p_queue.get()
 
-                    #     plt.plot(predict_p_plot[0], predict_p_plot[1], ".b")
-
-                # 更新
+                # 轮速计更新
                 if data_items[0] == 'ODOM':
                     velo = np.zeros(2)
                     velo[0] = wheel_radius * float(data_items[2]) / circle_pulse * 2 * math.pi / odom_span
                     velo[1] = wheel_radius * float(data_items[3]) / circle_pulse * 2 * math.pi / odom_span
                     eskf_filter.ObserveWheelSpeed(velo,odom_var*odom_var)
 
+                # GNSS更新
                 if data_items[0] == 'GNSS':
+
                     # 角度异常时不进行更新
                     if int(data_items[6]) != 1:
                         continue
@@ -244,9 +249,9 @@ if __name__ == '__main__':
                     gnss_pos, gnss_r = ConvertGps2UTM(np.array([float(data_items[2]), float(data_items[3]), float(data_items[4]), float(data_items[5])]),  # lat lon alt heading
                                                       np.array([antenna_pox_x, antenna_pox_y]), antenna_angle)
 
-                    if first_gnss:
+                    if not gnss_inited:
                         origin_pose = gnss_pos
-                        first_gnss = False
+                        gnss_inited = True
                         continue
 
                     # 移除起点
@@ -266,14 +271,14 @@ if __name__ == '__main__':
                         update_P, update_v, update_R))
 
                     if with_ui:
-                        if math.sqrt(np.sum(np.power(gnss_pos - last_gnss_pose,2))) >5:
+                        if math.sqrt(np.sum(np.power(gnss_pos - last_gnss_pose,2))) > 2:
                             update_p_queue.put((gnss_pos[0], gnss_pos[1], gnss_pos[2],
                                                 update_P[0], update_P[1], update_P[2]))
                             if update_p_queue.qsize() > 100:
                                 update_p_queue.get()
                             last_gnss_pose = gnss_pos
-
                 time.sleep(0.001)
+
 
     if with_ui:
         stop_event.set()

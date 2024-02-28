@@ -1,6 +1,6 @@
 import numpy as np
 import collections
-from liegroups.liegroups.numpy import SO3, SE3
+from liegroups.liegroups.numpy import SO3
 
 
 class IMUState():
